@@ -1,124 +1,180 @@
 package com.mygdx.game;
-
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.physics.box2d.*;
 import com.badlogic.gdx.utils.Array;
-import com.badlogic.gdx.utils.ScreenUtils;
 
 import java.util.Random;
 
 public class MyGdxGame extends ApplicationAdapter {
-	private float planetScale = 0.5f; // Adjust the scale factor as needed
-	private int planetRange = 1280;
-	SpriteBatch batch;
-	private Array<TextureRegion> planetTextures;
-	private Array<Float> planetRotationAngles;
+	private static final int NUM_PLANETS = 4;
+	private static final float PLANET_SCALE = 0.25f;
+	private SpriteBatch batch;
 	private OrthographicCamera camera;
-	private Array<Vector2> planetPositions;
+	private World world;
+	private Box2DDebugRenderer debugRenderer;
+	private Array<Body> planetBodies;
+	private Array<TextureRegion> planetTextures;
+	TextureRegion playerTextureRegion;
+	private Body playerBody;
+	private final float gravitationalForce = 50000000000000f; // Adjust the gravitational force as needed
 	private int currentPlanetIndex;
-	private float targetCameraY;
-	private float cameraSpeed;
+
 
 	@Override
-	public void create () {
+	public void create() {
 		batch = new SpriteBatch();
-		camera = new OrthographicCamera();
-		planetPositions = new Array<>();
-		planetRotationAngles = new Array<>();
-		currentPlanetIndex = 0;
-		targetCameraY = 0;
-		cameraSpeed = 5f; // Adjust the speed to your liking
-		planetTextures = new Array<>();
-		generateRandomPlanets();
-	}
-
-	@Override
-	public void resize(int width, int height) {
-		super.resize(width, height);
-		camera.setToOrtho(false, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-		targetCameraY = planetPositions.get(currentPlanetIndex).y; // Adjust the offset as needed
-	}
-
-	@Override
-	public void render () {
-		ScreenUtils.clear(1, 0, 0, 1);
-		float cameraY = camera.position.y;
-		cameraY += (targetCameraY - cameraY) * Gdx.graphics.getDeltaTime() * cameraSpeed;
-		camera.position.set(camera.position.x, cameraY, 0);
+		camera = new OrthographicCamera(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+		camera.position.set(camera.viewportWidth / 2f, camera.viewportHeight / 2f, 0);
 		camera.update();
-		batch.setProjectionMatrix(camera.combined);
 
-		batch.begin();
+		world = new World(new Vector2(0, -9.8f), true);
+		debugRenderer = new Box2DDebugRenderer();
 
-		for (int i = 0; i < planetPositions.size; i++) {
-			Vector2 planetPos = planetPositions.get(i);
-			TextureRegion planetTextureRegion = planetTextures.get(i);
-			float rotationAngle = planetRotationAngles.get(i); // Get the rotation angle of the planet
+		planetBodies = new Array<>();
+		planetTextures = new Array<>();
 
-			// Rotate the batch around the center of the planet
-			batch.draw(planetTextureRegion, planetPos.x, planetPos.y - planetRange,
-					planetRange / 2f, planetRange / 2f,
-					planetRange, planetRange,
-					planetScale, planetScale, rotationAngle);
+		generateRandomPlanets();
+		generatePlayer();
+		currentPlanetIndex = 0;
 
-			// Update the rotation angle for the next frame
-			rotationAngle += 1.0f; // Adjust the rotation speed as desired
-			planetRotationAngles.set(i, rotationAngle); // Update the rotation angle
+	}
+
+	private void generatePlayer() {
+		Texture playerTexture = new Texture(Gdx.files.internal("players/ufoBlue.png"));
+		playerTextureRegion = new TextureRegion(playerTexture);
+
+		// Create a Box2D body for the planet
+		BodyDef bodyDef = new BodyDef();
+		bodyDef.type = BodyDef.BodyType.DynamicBody;
+		bodyDef.position.set(((float) Gdx.graphics.getWidth() / 2), 450);
+		playerBody = world.createBody(bodyDef);
+
+		// Define the shape of the player
+		CircleShape circleShape = new CircleShape();
+		circleShape.setRadius(playerTextureRegion.getRegionWidth() * 0.5f);
+
+		// Create a fixture for the player
+		FixtureDef fixtureDef = new FixtureDef();
+		fixtureDef.shape = circleShape;
+		fixtureDef.density = 1.0f;
+		fixtureDef.friction = 0.2f;
+		fixtureDef.restitution = 0.5f;
+
+		playerBody.createFixture(fixtureDef);
+
+		// Add gravity to the planet
+		playerBody.setGravityScale(1.0f); // Adjust the gravity scale as needed
+	}
+
+	private void generateRandomPlanets() {
+		Random rand = new Random();
+
+		int width = Gdx.graphics.getWidth();
+		int height = Gdx.graphics.getHeight();
+		int[] horizontals = {250, width / 2, width - 250};
+		int[] verticals = {200, (height / 2) - 250, (height / 2) + 250, height - 200};
+		for (int i = 0; i < NUM_PLANETS; i++) {
+			float x = horizontals[rand.nextInt(3)];
+			float y = verticals[i];
+
+			Texture planetTexture = new Texture(Gdx.files.internal("planets/" + String.format("%02d.png", i)));
+			TextureRegion planetTextureRegion = new TextureRegion(planetTexture);
+
+			// Create a Box2D body for the planet
+			BodyDef bodyDef = new BodyDef();
+			bodyDef.type = BodyDef.BodyType.StaticBody;
+			bodyDef.position.set(x, y);
+			Body planetBody = world.createBody(bodyDef);
+
+			// Define the shape of the planet
+			CircleShape circleShape = new CircleShape();
+			circleShape.setRadius(planetTextureRegion.getRegionWidth() * 0.5f * PLANET_SCALE);
+
+			// Create a fixture for the planet
+			FixtureDef fixtureDef = new FixtureDef();
+			fixtureDef.shape = circleShape;
+			fixtureDef.density = 1.0f;
+			fixtureDef.friction = 0.2f;
+			fixtureDef.restitution = 0.5f;
+
+			planetBody.createFixture(fixtureDef);
+
+			// Add gravity to the planet
+			planetBody.setGravityScale(1.0f); // Adjust the gravity scale as needed
+
+			planetBodies.add(planetBody);
+			planetTextures.add(planetTextureRegion);
 		}
+	}
+
+	@Override
+	public void render() {
+		Gdx.gl.glClearColor(0.2f, 0.2f, 0.2f, 1);
+		Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+		float deltaTime = Gdx.graphics.getDeltaTime();
+
+		// Update Box2D physics
+		world.step(deltaTime, 6, 2);
+
+		// Apply gravitational force from planets to the player
+		Body planetBody = planetBodies.get(currentPlanetIndex); // Retrieve the Box2D body for the planet
+
+		// Calculate the direction and distance between the planet and the player
+		Vector2 playerPos = playerBody.getPosition();
+		Vector2 direction = planetBody.getPosition().cpy().sub(playerPos);
+		float distance = direction.len();
+
+		// Apply gravitational force based on distance
+		Vector2 force = direction.nor().scl(gravitationalForce / (distance * distance));
+		playerBody.applyForceToCenter(force, true);
+
+		batch.setProjectionMatrix(camera.combined);
+		batch.begin();
+		// Render planets
+		for (int i = 0; i < planetBodies.size; i++) {
+			Vector2 planetPos = planetBodies.get(i).getPosition();
+			TextureRegion planetTextureRegion = planetTextures.get(i);
+
+			// Draw the planet at its Box2D body position
+			float planetSize = planetTextureRegion.getRegionWidth() * PLANET_SCALE;
+			float planetX = planetPos.x - planetSize * 0.5f;
+			float planetY = planetPos.y - planetSize * 0.5f;
+			batch.draw(planetTextureRegion, planetX, planetY, planetSize, planetSize);
+		}
+
+		float playerSize = playerTextureRegion.getRegionWidth();
+		// Render player
+		batch.draw(playerTextureRegion, playerBody.getPosition().x - playerSize * 0.5f,
+				playerBody.getPosition().y - playerSize * 0.5f, playerSize, playerSize);
 
 		batch.end();
 
+		// Optional: Render Box2D debug shapes (for debugging purposes)
+		debugRenderer.render(world, camera.combined);
+
 		if (Gdx.input.justTouched()) {
 			currentPlanetIndex++;
-			if (currentPlanetIndex >= planetPositions.size) {
+			if (currentPlanetIndex >= planetBodies.size) {
 				currentPlanetIndex = 0;
 			}
-			targetCameraY = planetPositions.get(currentPlanetIndex).y - Gdx.graphics.getHeight() * 0.3f; // Adjust the offset as needed
+			System.out.println("currentPlanetIndex" + currentPlanetIndex);
+			//targetCameraY = planetPositions.get(currentPlanetIndex).y - Gdx.graphics.getHeight() * 0.3f; // Adjust the offset as needed
 		}
 	}
-	
+
+
 	@Override
-	public void dispose () {
+	public void dispose() {
 		batch.dispose();
-	}
-	private void generateRandomPlanets() {
-		int numPlanets = 10; // Number of random planets to generate
-		Random random = new Random();
-
-		// Clear the existing planet positions
-		planetPositions.clear();
-
-		// Generate random planets
-		for (int i = 0; i < numPlanets; i++) {
-			float x = 0;
-			float y = random.nextFloat() * Gdx.graphics.getHeight() * planetScale; // Random y-coordinate within the bottom half of the screen
-			// Assign a random rotation angle
-			float rotationAngle = random.nextFloat() * 360f; // Random angle between 0 and 360 degrees
-
-			// Adjust y-coordinate to avoid overlaps
-			for (Vector2 existingPos : planetPositions) {
-				// Check for overlap with existing planets
-				if (Math.abs(existingPos.x - x) < planetRange &&
-						Math.abs(existingPos.y - y) < planetRange) {
-					// Adjust y-coordinate if there is an overlap
-					y += planetRange; // Increase the spacing between planets (adjust as needed)
-				}
-			}
-
-			// Load random planet image
-			String imagePath = "planets/" + String.format("%02d", i) + ".png";
-			Texture planetTexture = new Texture(imagePath);
-			TextureRegion planetTextureRegion = new TextureRegion(planetTexture);
-
-			// Add the planet position and texture region to the list
-			planetPositions.add(new Vector2(x, y));
-			planetTextures.add(planetTextureRegion);
-			planetRotationAngles.add(rotationAngle); // Store the rotation angle
-		}
+		world.dispose();
+		debugRenderer.dispose();
 	}
 }
+
